@@ -84,11 +84,11 @@ class PyFryApp:
         ).pack(side=tk.LEFT, padx=18)
 
         tk.Button(
-            bar, text="Open File…", bg=ACCENT, fg="white", relief=tk.FLAT,
+            bar, text="Clear", bg=ACCENT2, fg=FG_DIM, relief=tk.FLAT,
             font=("Segoe UI", 9, "bold"), padx=14, cursor="hand2",
-            activebackground="#c9687a", activeforeground="white",
-            command=self._open_file,
-        ).pack(side=tk.RIGHT, padx=12, pady=10)
+            activebackground="#363a4f", activeforeground=FG,
+            command=self._clear,
+        ).pack(side=tk.RIGHT, padx=(4, 12), pady=10)
 
         missing = []
         if not HAS_DND:     missing.append("tkinterdnd2")
@@ -318,6 +318,22 @@ class PyFryApp:
         ])
         if path:
             self._load_path(path)
+
+    def _clear(self):
+        self._stop_animation()
+        self._source = None
+        self._source_path = None
+        self._is_video = False
+        self._is_gif = False
+        self._gif_frames = []
+        self._gif_durations = []
+        self._gif_processed = []
+        self._last_video_output = None
+        self._tk_img = None
+        self._status_var.set("Drop an image or video here  •  Ctrl+V to paste  •  double-click to open")
+        self._canvas.delete("all")
+        self._draw_hint()
+        self._refresh_button_labels()
 
     def _paste(self, _event=None):
         try:
