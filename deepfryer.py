@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from app import PyFryApp, HAS_DND, TkinterDnD
-from widgets import BG2, ACCENT
+from widgets import BG2, ACCENT, FG
 
 
 def main():
@@ -23,12 +23,12 @@ def main():
     style = ttk.Style(root)
     style.theme_use("clam")
     style.configure("Horizontal.TScale",
-                     background=BG2, troughcolor="#363a4f",
-                     sliderthickness=15, sliderrelief="flat")
+                     background=BG2, troughcolor="#222222",
+                     sliderthickness=14, sliderrelief="flat")
     style.configure("TProgressbar",
-                     background=ACCENT, troughcolor="#363a4f",
-                     bordercolor=BG2, lightcolor=ACCENT, darkcolor=ACCENT)
-    style.configure("TSeparator", background="#363a4f")
+                     background=FG, troughcolor="#1a1a1a",
+                     bordercolor=BG2, lightcolor=FG, darkcolor=FG)
+    style.configure("TSeparator", background="#333333")
 
     PyFryApp(root)
     root.mainloop()

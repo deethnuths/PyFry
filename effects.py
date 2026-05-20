@@ -1,54 +1,25 @@
 import io
+import importlib.util
 import multiprocessing
 
 import numpy as np
 from PIL import Image, ImageEnhance
 
-# ── Optional heavy deps ────────────────────────────────────────────────────────
-cv2 = None
-HAS_CV2 = False
-try:
-    import cv2
-    HAS_CV2 = True
-except ImportError:
-    pass
-
-VideoFileClip = None
-AudioFileClip = None
-AudioArrayClip = None
-HAS_MOVIEPY = False
-try:
-    from moviepy import VideoFileClip, AudioFileClip  # moviepy 2.x
-    from moviepy.audio.AudioClip import AudioArrayClip
-    HAS_MOVIEPY = True
-except ImportError:
-    try:
-        from moviepy.editor import VideoFileClip      # moviepy 1.x fallback
-        HAS_MOVIEPY = True
-    except ImportError:
-        pass
+# ── Availability flags — use find_spec so we don't pay import cost at startup ──
+HAS_CV2     = importlib.util.find_spec("cv2")     is not None
+HAS_MOVIEPY = importlib.util.find_spec("moviepy") is not None
 
 # ── Supported file types ───────────────────────────────────────────────────────
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
 
-try:
-    _HAS_CUDA = cv2.cuda.getCudaEnabledDeviceCount() > 0 if HAS_CV2 else False
-except Exception:
-    _HAS_CUDA = False
-
 _N_WORKERS = max(2, multiprocessing.cpu_count())
 
 
 def distort_audio(samples: np.ndarray, amount: float) -> np.ndarray:
-    """Hard-clip and boost audio samples to create digital distortion.
-
-    amount=0 → untouched, amount=1 → full saturation / square-wave clipping.
-    samples must be float in [-1, 1] (moviepy's default format).
-    """
     if amount < 0.01:
         return samples
-    gain = 1.0 + amount * 20.0   # up to 21× boost before clipping
+    gain = 1.0 + amount * 20.0
     return np.clip(samples * gain, -1.0, 1.0)
 
 
@@ -61,7 +32,6 @@ def apply_deep_fry(
     noise: float,
     jpeg_quality: int,
 ) -> Image.Image:
-    """Apply all deep-fry effects to a PIL Image and return the result."""
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGB")
     if img.mode == "RGBA":
@@ -96,11 +66,8 @@ def apply_deep_fry_cv2(
     noise: float,
     jpeg_quality: int,
 ) -> np.ndarray:
-    """Deep-fry a BGR uint8 frame using numpy/cv2 only — no PIL overhead.
+    import cv2  # lazy — cached in sys.modules after first call
 
-    ~3-5× faster than the PIL path; safe to call from worker threads because
-    numpy operations release the GIL.
-    """
     img = bgr.astype(np.float32)
 
     if brightness != 1.0:

@@ -17,10 +17,13 @@ from effects import (
     apply_deep_fry, apply_deep_fry_cv2, distort_audio,
     IMAGE_EXTS, VIDEO_EXTS,
     HAS_CV2, HAS_MOVIEPY,
-    cv2, VideoFileClip, AudioArrayClip,
     _N_WORKERS,
 )
-from widgets import SliderRow, BG, BG2, BG3, ACCENT, ACCENT2, FG, FG_DIM, ORANGE
+from widgets import (
+    SliderRow, RoundedPanel, RoundedButton,
+    BG, BG2, BG3, ACCENT, ACCENT2, FG, FG_DIM, ORANGE, BORDER,
+    F_BODY, F_SMALL, F_TITLE, F_HEAD, F_BIG,
+)
 
 # ── Optional drag-and-drop ─────────────────────────────────────────────────────
 DND_FILES = None
@@ -62,7 +65,6 @@ class PyFryApp:
         self._drag_start: tuple | None = None
         self._preview_job = None
         self._processing = False
-        self._video_copy_mode = False
         self._cancel_flag = threading.Event()
 
         self._build_ui()
@@ -84,16 +86,9 @@ class PyFryApp:
         bar.pack_propagate(False)
 
         tk.Label(
-            bar, text="🔥  PYFRY", fg=ACCENT, bg=ACCENT2,
-            font=("Segoe UI", 17, "bold"),
+            bar, text="🔥  PYFRY", fg=FG, bg=ACCENT2,
+            font=F_TITLE,
         ).pack(side=tk.LEFT, padx=18)
-
-        tk.Button(
-            bar, text="Clear", bg=ACCENT2, fg=FG_DIM, relief=tk.FLAT,
-            font=("Segoe UI", 9, "bold"), padx=14, cursor="hand2",
-            activebackground="#363a4f", activeforeground=FG,
-            command=self._clear,
-        ).pack(side=tk.RIGHT, padx=(4, 12), pady=10)
 
         missing = []
         if not HAS_DND:     missing.append("tkinterdnd2")
@@ -102,98 +97,96 @@ class PyFryApp:
         if missing:
             tk.Label(
                 bar, text=f"pip install {' '.join(missing)}",
-                fg="#6e738d", bg=ACCENT2, font=("Consolas", 8),
+                fg=FG_DIM, bg=ACCENT2, font=F_SMALL,
             ).pack(side=tk.RIGHT, padx=8)
 
     def _build_preview(self, parent):
-        frame = tk.Frame(parent, bg=BG3, bd=0, relief=tk.FLAT)
-        frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+        panel = RoundedPanel(parent, radius=8, bg=BG3, outer_bg=BG)
+        panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
 
-        self._canvas = tk.Canvas(frame, bg="#181926", highlightthickness=0,
+        self._canvas = tk.Canvas(panel.inner, bg=BG, highlightthickness=0,
                                   cursor="hand2")
-        self._canvas.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+        self._canvas.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self._canvas.bind("<Double-Button-1>", lambda _: self._open_file())
         self._canvas.bind("<Configure>", self._on_canvas_resize)
 
         self._status_var = tk.StringVar(
             value="Drop an image or video here  •  Ctrl+V to paste  •  double-click to open")
         tk.Label(
-            frame, textvariable=self._status_var, fg=FG_DIM, bg=BG3,
-            font=("Segoe UI", 8), anchor="w",
+            panel.inner, textvariable=self._status_var, fg=FG_DIM, bg=BG3,
+            font=F_SMALL, anchor="w",
         ).pack(fill=tk.X, padx=8, pady=(0, 4))
 
         self._draw_hint()
 
     def _build_controls(self, parent):
-        ctrl = tk.Frame(parent, bg=BG2, width=292)
-        ctrl.pack(side=tk.RIGHT, fill=tk.Y)
-        ctrl.pack_propagate(False)
+        panel = RoundedPanel(parent, radius=8, bg=BG2, outer_bg=BG, width=308)
+        panel.pack(side=tk.RIGHT, fill=tk.Y)
+        ctrl = panel.inner
 
-        tk.Label(ctrl, text="EFFECTS", fg=ACCENT, bg=BG2,
-                 font=("Segoe UI", 11, "bold")).pack(pady=(18, 6))
+        tk.Label(ctrl, text="EFFECTS", fg=FG, bg=BG2,
+                 font=F_HEAD).pack(pady=(16, 6))
 
         def _sep():
-            ttk.Separator(ctrl, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=14, pady=8)
+            ttk.Separator(ctrl, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=12, pady=8)
 
         upd = self._schedule_preview
 
         self._sl_brightness = SliderRow(ctrl, "Brightness", 0.1, 6.0, 1.0, on_change=upd)
-        self._sl_brightness.pack(fill=tk.X, padx=4, pady=3)
+        self._sl_brightness.pack(fill=tk.X, padx=4, pady=2)
 
         self._sl_contrast   = SliderRow(ctrl, "Contrast",   0.1, 6.0, 1.0, on_change=upd)
-        self._sl_contrast.pack(fill=tk.X, padx=4, pady=3)
+        self._sl_contrast.pack(fill=tk.X, padx=4, pady=2)
 
         self._sl_sharpness  = SliderRow(ctrl, "Sharpness",  0.0, 25.0, 1.0, on_change=upd)
-        self._sl_sharpness.pack(fill=tk.X, padx=4, pady=3)
+        self._sl_sharpness.pack(fill=tk.X, padx=4, pady=2)
 
         self._sl_saturation = SliderRow(ctrl, "Saturation", 0.0, 10.0, 1.0, on_change=upd)
-        self._sl_saturation.pack(fill=tk.X, padx=4, pady=3)
+        self._sl_saturation.pack(fill=tk.X, padx=4, pady=2)
 
         self._sl_noise      = SliderRow(ctrl, "Noise",      0.0,  1.0, 0.0, on_change=upd)
-        self._sl_noise.pack(fill=tk.X, padx=4, pady=3)
+        self._sl_noise.pack(fill=tk.X, padx=4, pady=2)
 
         self._sl_jpeg = SliderRow(
             ctrl, "JPEG Crush", 1, 95, 85,
             fmt="{:.0f}", on_change=upd,
         )
-        self._sl_jpeg.pack(fill=tk.X, padx=4, pady=3)
+        self._sl_jpeg.pack(fill=tk.X, padx=4, pady=2)
 
         self._sl_audio = SliderRow(ctrl, "Audio Crush", 0.0, 1.0, 0.0)
-        self._sl_audio.pack(fill=tk.X, padx=4, pady=3)
-        tk.Label(ctrl, text="↑ video only", fg="#6e738d", bg=BG2,
-                 font=("Segoe UI", 7)).pack(anchor="e", padx=14)
+        self._sl_audio.pack(fill=tk.X, padx=4, pady=2)
+        tk.Label(ctrl, text="↑ video only", fg=FG_DIM, bg=BG2,
+                 font=F_SMALL).pack(anchor="e", padx=14)
 
         _sep()
 
-        tk.Label(ctrl, text="PRESETS", fg=ACCENT, bg=BG2,
-                 font=("Segoe UI", 11, "bold")).pack(pady=(0, 6))
+        tk.Label(ctrl, text="PRESETS", fg=FG, bg=BG2,
+                 font=F_HEAD).pack(pady=(0, 6))
 
-        def _pbtn_row(parent, text, color, cmd):
-            tk.Button(
-                parent, text=text, bg=color, fg="white", relief=tk.FLAT,
-                font=("Segoe UI", 8, "bold"), width=1, pady=5, cursor="hand2",
-                activeforeground="white", activebackground=color,
-                command=cmd,
+        def _pbtn(par, text, color, cmd):
+            RoundedButton(
+                par, text=text, command=cmd,
+                bg=color, fg="white", border_color=color,
+                font=F_SMALL, radius=4, height=28, width=1,
             ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
         row1 = tk.Frame(ctrl, bg=BG2)
-        row1.pack(fill=tk.X, padx=10, pady=(0, 3))
-        _pbtn_row(row1, "RESET",  "#494d64", self._preset_reset)
-        _pbtn_row(row1, "WARM",   "#3d7a62", self._preset_warm)
-        _pbtn_row(row1, "TOASTY", "#7a6228", self._preset_toasty)
+        row1.pack(fill=tk.X, padx=8, pady=(0, 2))
+        _pbtn(row1, "RESET",  "#1a1a1a",  self._preset_reset)
+        _pbtn(row1, "WARM",   "#3d7a62",  self._preset_warm)
+        _pbtn(row1, "TOASTY", "#7a6228",  self._preset_toasty)
 
         row2 = tk.Frame(ctrl, bg=BG2)
-        row2.pack(fill=tk.X, padx=10, pady=(0, 4))
-        _pbtn_row(row2, "SPICY",  "#8a3840", self._preset_spicy)
-        _pbtn_row(row2, "CRISPY", ORANGE,    self._preset_crispy)
-        _pbtn_row(row2, "NUKED",  ACCENT,    self._preset_nuked)
+        row2.pack(fill=tk.X, padx=8, pady=(0, 4))
+        _pbtn(row2, "SPICY",  "#8a3840",  self._preset_spicy)
+        _pbtn(row2, "CRISPY", ORANGE,     self._preset_crispy)
+        _pbtn(row2, "NUKED",  ACCENT,     self._preset_nuked)
 
-        tk.Button(
-            ctrl, text="🎲  RANDOMIZE", bg="#363a4f", fg=FG, relief=tk.FLAT,
-            font=("Segoe UI", 9, "bold"), pady=5, cursor="hand2",
-            activebackground="#494d64", activeforeground=FG,
-            command=self._randomize,
-        ).pack(fill=tk.X, padx=10, pady=(0, 2))
+        RoundedButton(
+            ctrl, text="RANDOMIZE", command=self._randomize,
+            bg="#111111", fg=FG, border_color=BORDER,
+            font=F_BODY, radius=4, height=30,
+        ).pack(fill=tk.X, padx=8, pady=(0, 2))
 
         _sep()
 
@@ -201,65 +194,57 @@ class PyFryApp:
         self._progbar = ttk.Progressbar(
             ctrl, variable=self._prog_var, maximum=100, mode="determinate",
         )
-        self._progbar.pack(fill=tk.X, padx=16, pady=(0, 4))
+        self._progbar.pack(fill=tk.X, padx=14, pady=(0, 4))
 
-        self._prog_lbl = tk.Label(ctrl, text="", fg=FG_DIM, bg=BG2,
-                                   font=("Segoe UI", 8))
+        self._prog_lbl = tk.Label(ctrl, text="", fg=FG_DIM, bg=BG2, font=F_SMALL)
         self._prog_lbl.pack()
 
-        self._cancel_btn = tk.Button(
-            ctrl, text="CANCEL", bg="#5a2c2c", fg="white", relief=tk.FLAT,
-            font=("Segoe UI", 9, "bold"), pady=4, cursor="hand2",
-            activebackground="#7a3a40", activeforeground="white",
-            command=self._cancel_video,
+        self._cancel_btn = RoundedButton(
+            ctrl, text="CANCEL", command=self._cancel_video,
+            bg="#200808", fg="white", border_color="#883333",
+            font=F_BODY, radius=4, height=30,
         )
         # not packed yet — appears only while processing
 
-        self._save_btn = tk.Button(
-            ctrl, text="SAVE / EXPORT", bg=ACCENT, fg="white",
-            font=("Segoe UI", 12, "bold"), relief=tk.FLAT, pady=12,
-            cursor="hand2", activebackground="#c9687a", activeforeground="white",
-            command=self._save,
+        self._save_btn = RoundedButton(
+            ctrl, text="SAVE / EXPORT", command=self._save,
+            bg=FG, fg="#000000", border_color=FG,
+            font=F_BIG, radius=4, height=44,
         )
-        self._save_btn.pack(fill=tk.X, padx=16, pady=(4, 6), side=tk.BOTTOM)
+        self._save_btn.pack(fill=tk.X, padx=14, pady=(4, 6), side=tk.BOTTOM)
 
-        self._copy_btn = tk.Button(
-            ctrl, text="COPY TO CLIPBOARD", bg="#494d64", fg=FG,
-            font=("Segoe UI", 9, "bold"), relief=tk.FLAT, pady=8,
-            cursor="hand2", activebackground="#5b6078", activeforeground=FG,
-            command=self._copy_to_clipboard,
+        self._copy_btn = RoundedButton(
+            ctrl, text="COPY TO CLIPBOARD", command=self._copy_to_clipboard,
+            bg=BG2, fg=FG, border_color=BORDER,
+            font=F_BODY, radius=4, height=36,
         )
-        self._copy_btn.pack(fill=tk.X, padx=16, pady=(12, 0), side=tk.BOTTOM)
+        self._copy_btn.pack(fill=tk.X, padx=14, pady=(10, 0), side=tk.BOTTOM)
 
-        self._fry_again_btn = tk.Button(
-            ctrl, text="FRY AGAIN", bg="#363a4f", fg=ORANGE,
-            font=("Segoe UI", 9, "bold"), relief=tk.FLAT, pady=8,
-            cursor="hand2", activebackground="#494d64", activeforeground=ORANGE,
-            command=self._fry_again,
+        self._fry_again_btn = RoundedButton(
+            ctrl, text="FRY AGAIN", command=self._fry_again,
+            bg=BG2, fg=ORANGE, border_color=ORANGE,
+            font=F_BODY, radius=4, height=36,
         )
-        self._fry_again_btn.pack(fill=tk.X, padx=16, pady=(4, 0), side=tk.BOTTOM)
+        self._fry_again_btn.pack(fill=tk.X, padx=14, pady=(4, 0), side=tk.BOTTOM)
 
-        self._vid_render_btn = tk.Button(
-            ctrl, text="RENDER", bg=ACCENT, fg="white",
-            font=("Segoe UI", 12, "bold"), relief=tk.FLAT, pady=12,
-            cursor="hand2", activebackground="#c9687a", activeforeground="white",
-            command=self._render_video,
+        self._vid_render_btn = RoundedButton(
+            ctrl, text="RENDER", command=self._render_video,
+            bg=FG, fg="#000000", border_color=FG,
+            font=F_BIG, radius=4, height=44,
         )
         # not packed yet
 
         self._vid_action_row = tk.Frame(ctrl, bg=BG2)
-        self._vid_copy_btn = tk.Button(
-            self._vid_action_row, text="COPY", bg="#1e2030", fg="#6e738d",
-            font=("Segoe UI", 9, "bold"), relief=tk.FLAT, pady=8,
-            cursor="hand2", activebackground="#5b6078", activeforeground=FG,
-            state=tk.DISABLED, command=self._copy_rendered_video,
+        self._vid_copy_btn = RoundedButton(
+            self._vid_action_row, text="COPY", command=self._copy_rendered_video,
+            bg=BG2, fg=FG_DIM, border_color="#333333",
+            font=F_BODY, radius=4, height=36, width=1, state=tk.DISABLED,
         )
         self._vid_copy_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        self._vid_save_btn = tk.Button(
-            self._vid_action_row, text="SAVE", bg="#1e2030", fg="#6e738d",
-            font=("Segoe UI", 9, "bold"), relief=tk.FLAT, pady=8,
-            cursor="hand2", activebackground="#5b6078", activeforeground=FG,
-            state=tk.DISABLED, command=self._save_rendered_video,
+        self._vid_save_btn = RoundedButton(
+            self._vid_action_row, text="SAVE", command=self._save_rendered_video,
+            bg=BG2, fg=FG_DIM, border_color="#333333",
+            font=F_BODY, radius=4, height=36, width=1, state=tk.DISABLED,
         )
         self._vid_save_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
         # not packed yet
@@ -272,8 +257,8 @@ class PyFryApp:
             self._fry_again_btn.pack_forget()
             self._vid_render_btn.pack(fill=tk.X, padx=16, pady=(4, 6), side=tk.BOTTOM)
             self._vid_action_row.pack(fill=tk.X, padx=16, pady=(8, 0), side=tk.BOTTOM)
-            self._vid_copy_btn.config(state=tk.DISABLED, bg="#1e2030", fg="#6e738d")
-            self._vid_save_btn.config(state=tk.DISABLED, bg="#1e2030", fg="#6e738d")
+            self._vid_copy_btn.config(state=tk.DISABLED, bg=BG2, fg=FG_DIM, highlightbackground="#333333")
+            self._vid_save_btn.config(state=tk.DISABLED, bg=BG2, fg=FG_DIM, highlightbackground="#333333")
         else:
             self._vid_render_btn.pack_forget()
             self._vid_action_row.pack_forget()
@@ -287,12 +272,12 @@ class PyFryApp:
         w = max(self._canvas.winfo_width(), 100)
         h = max(self._canvas.winfo_height(), 100)
         cx, cy = w // 2, h // 2
-        self._canvas.create_text(cx, cy - 30, text="🔥", font=("Segoe UI", 52),
+        self._canvas.create_text(cx, cy - 30, text="🔥", font=("Cascadia Code", 48),
                                   tags="hint")
         self._canvas.create_text(cx, cy + 42, text="Drop image or video here",
-                                  fill=FG_DIM, font=("Segoe UI", 14), tags="hint")
-        self._canvas.create_text(cx, cy + 70, text="Ctrl+V  •  double-click to open",
-                                  fill="#6e738d", font=("Segoe UI", 9), tags="hint")
+                                  fill=FG_DIM, font=("Cascadia Code", 12), tags="hint")
+        self._canvas.create_text(cx, cy + 66, text="Ctrl+V  •  double-click to open",
+                                  fill=FG_DIM, font=("Cascadia Code", 8), tags="hint")
 
     # ── Event binding ──────────────────────────────────────────────────────────
     def _bind_events(self):
@@ -307,20 +292,25 @@ class PyFryApp:
         self._canvas.bind("<Button-5>",          self._on_zoom)   # Linux scroll down
         self._canvas.bind("<ButtonPress-3>",     self._reset_view) # right-click resets
 
-        # Reset-view overlay button tag bindings (items created in _update_reset_btn)
         self._canvas.tag_bind("reset_btn", "<ButtonPress-1>", self._reset_view)
         self._canvas.tag_bind("reset_btn", "<Enter>",
-            lambda _: self._canvas.itemconfig("reset_btn_bg", fill="#363a4f"))
+            lambda _: self._canvas.itemconfig("reset_btn_bg", fill="#222222"))
         self._canvas.tag_bind("reset_btn", "<Leave>",
-            lambda _: self._canvas.itemconfig("reset_btn_bg", fill="#2a2d3e"))
+            lambda _: self._canvas.itemconfig("reset_btn_bg", fill="#111111"))
+
+        self._canvas.tag_bind("clear_btn", "<ButtonPress-1>", lambda _: self._clear())
+        self._canvas.tag_bind("clear_btn", "<Enter>",
+            lambda _: self._canvas.itemconfig("clear_btn_bg", fill="#2a1111"))
+        self._canvas.tag_bind("clear_btn", "<Leave>",
+            lambda _: self._canvas.itemconfig("clear_btn_bg", fill="#111111"))
 
         if HAS_DND:
             self._canvas.drop_target_register(DND_FILES)
             self._canvas.dnd_bind("<<Drop>>",      self._on_drop)
             self._canvas.dnd_bind("<<DragEnter>>",
-                lambda _: self._canvas.config(bg="#1e2e2a"))
+                lambda _: self._canvas.config(bg="#151515"))
             self._canvas.dnd_bind("<<DragLeave>>",
-                lambda _: self._canvas.config(bg="#181926"))
+                lambda _: self._canvas.config(bg=BG))
 
     def _on_canvas_resize(self, _event):
         if self._source is None:
@@ -336,7 +326,7 @@ class PyFryApp:
             return
         # Don't start a drag when clicking the reset-view overlay button
         hit = self._canvas.find_overlapping(event.x - 1, event.y - 1, event.x + 1, event.y + 1)
-        if any("reset_btn" in self._canvas.gettags(i) for i in hit):
+        if any(t in self._canvas.gettags(i) for i in hit for t in ("reset_btn", "clear_btn")):
             return
         self._drag_start = (event.x, event.y)
         self._canvas.config(cursor="fleur")
@@ -377,39 +367,59 @@ class PyFryApp:
         self._pan_y = 0
         self._render_view()
 
-    def _update_reset_btn(self):
+    def _update_overlay_btns(self):
         self._canvas.delete("reset_btn")
-        if self._zoom == 1.0 and self._pan_x == 0 and self._pan_y == 0:
-            return
+        self._canvas.delete("clear_btn")
 
         cw  = self._canvas.winfo_width()
         pad = 8
         sz  = 24
-        x1, y1 = cw - pad - sz, pad
-        x2, y2 = cw - pad,      pad + sz
+        gap = 4
 
-        # Background pill (stipple gives dithered transparency)
-        self._canvas.create_rectangle(
-            x1, y1, x2, y2,
-            fill="#2a2d3e", outline="#6e738d", width=1,
-            stipple="gray75",
-            tags=("reset_btn", "reset_btn_bg"),
-        )
+        # Clear button — always visible when an image is loaded
+        if self._source is not None:
+            cx1 = cw - pad - sz
+            cy1 = pad
+            cx2 = cw - pad
+            cy2 = pad + sz
+            self._canvas.create_rectangle(
+                cx1, cy1, cx2, cy2,
+                fill="#111111", outline="#333333", width=1,
+                stipple="gray75",
+                tags=("clear_btn", "clear_btn_bg"),
+            )
+            m = 7
+            self._canvas.create_line(cx1+m, cy1+m, cx2-m, cy2-m,
+                                      fill=FG_DIM, width=1.5, tags="clear_btn")
+            self._canvas.create_line(cx2-m, cy1+m, cx1+m, cy2-m,
+                                      fill=FG_DIM, width=1.5, tags="clear_btn")
 
-        # Four-corner "fit" icon drawn with L-shaped lines
-        m = 5   # margin from button edge to icon area
-        a = 5   # arm length of each corner bracket
-        ix1, iy1 = x1 + m, y1 + m
-        ix2, iy2 = x2 - m, y2 - m
-        kw = dict(fill="#cad3f5", width=1.5, tags=("reset_btn",))
-        self._canvas.create_line(ix1, iy1 + a, ix1, iy1, ix1 + a, iy1, **kw)  # top-left
-        self._canvas.create_line(ix2 - a, iy1, ix2, iy1, ix2, iy1 + a, **kw)  # top-right
-        self._canvas.create_line(ix1, iy2 - a, ix1, iy2, ix1 + a, iy2, **kw)  # bottom-left
-        self._canvas.create_line(ix2 - a, iy2, ix2, iy2, ix2, iy2 - a, **kw)  # bottom-right
+        # Fit/reset-view button — visible when zoomed or panned
+        if not (self._zoom == 1.0 and self._pan_x == 0 and self._pan_y == 0):
+            offset = sz + gap if self._source is not None else 0
+            x1 = cw - pad - sz - offset
+            y1 = pad
+            x2 = cw - pad - offset
+            y2 = pad + sz
+            self._canvas.create_rectangle(
+                x1, y1, x2, y2,
+                fill="#111111", outline="#333333", width=1,
+                stipple="gray75",
+                tags=("reset_btn", "reset_btn_bg"),
+            )
+            m = 5
+            a = 5
+            ix1, iy1 = x1 + m, y1 + m
+            ix2, iy2 = x2 - m, y2 - m
+            kw = dict(fill=FG_DIM, width=1.5, tags=("reset_btn",))
+            self._canvas.create_line(ix1, iy1 + a, ix1, iy1, ix1 + a, iy1, **kw)
+            self._canvas.create_line(ix2 - a, iy1, ix2, iy1, ix2, iy1 + a, **kw)
+            self._canvas.create_line(ix1, iy2 - a, ix1, iy2, ix1 + a, iy2, **kw)
+            self._canvas.create_line(ix2 - a, iy2, ix2, iy2, ix2, iy2 - a, **kw)
 
     # ── File loading ───────────────────────────────────────────────────────────
     def _on_drop(self, event):
-        self._canvas.config(bg="#181926")
+        self._canvas.config(bg=BG)
         raw = event.data.strip()
         paths = self.root.tk.splitlist(raw)
         if paths:
@@ -532,6 +542,7 @@ class PyFryApp:
                 )
                 return
             try:
+                import cv2
                 cap = cv2.VideoCapture(path)
                 ret, frame = cap.read()
                 cap.release()
@@ -599,7 +610,7 @@ class PyFryApp:
 
         if vis_r <= vis_l or vis_b <= vis_t:
             self._canvas.delete("all")
-            self._update_reset_btn()
+            self._update_overlay_btns()
             return
 
         # map visible canvas region back to original image pixels
@@ -614,7 +625,7 @@ class PyFryApp:
         self._tk_img = ImageTk.PhotoImage(tile)
         self._canvas.delete("all")
         self._canvas.create_image(vis_l, vis_t, anchor=tk.NW, image=self._tk_img)
-        self._update_reset_btn()
+        self._update_overlay_btns()
 
     # ── GIF animation ──────────────────────────────────────────────────────────
     def _tick_animation(self):
@@ -819,10 +830,10 @@ class PyFryApp:
             self._status_var.set(f"GIF copy failed: {exc}")
 
     def _flash_copy_btn(self, label: str = "COPIED!"):
-        self._copy_btn.config(bg="#2b4a42", text=label)
+        self._copy_btn.config(bg="#0a1a10", text=label)
         self._status_var.set("Copied to clipboard")
         self.root.after(1400, lambda: self._copy_btn.config(
-            bg="#494d64", text="COPY TO CLIPBOARD"))
+            bg=BG2, text="COPY TO CLIPBOARD"))
 
     # ── Save / Export ──────────────────────────────────────────────────────────
     def _save(self):
@@ -884,7 +895,6 @@ class PyFryApp:
                                   "Install opencv-python for video rendering.")
             return
         tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
-        self._video_copy_mode = False
         self._start_video_processing(tmp)
 
     def _copy_rendered_video(self):
@@ -911,32 +921,13 @@ class PyFryApp:
         except Exception as exc:
             messagebox.showerror("Save failed", str(exc))
 
-    def _copy_video_to_clipboard(self):
-        if not HAS_CV2:
-            messagebox.showerror("Missing dependency",
-                                  "Install opencv-python for video clipboard copy.")
-            return
-        if self._processing:
-            messagebox.showinfo("Busy", "Video processing is already running.")
-            return
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
-            tmp = f.name
-        if self._copy_tmp and os.path.exists(self._copy_tmp):
-            try:
-                os.unlink(self._copy_tmp)
-            except OSError:
-                pass
-        self._copy_tmp = tmp
-        self._video_copy_mode = True
-        self._start_video_processing(tmp)
-
     def _start_video_processing(self, out_path: str):
         self._processing = True
         self._cancel_flag.clear()
         self._vid_render_btn.config(state=tk.DISABLED, text="Rendering…")
-        self._vid_copy_btn.config(state=tk.DISABLED, bg="#1e2030", fg="#6e738d")
-        self._vid_save_btn.config(state=tk.DISABLED, bg="#1e2030", fg="#6e738d")
-        self._cancel_btn.pack(fill=tk.X, padx=16, pady=(4, 0), before=self._vid_render_btn)
+        self._vid_copy_btn.config(state=tk.DISABLED, bg=BG2, fg=FG_DIM, highlightbackground="#333333")
+        self._vid_save_btn.config(state=tk.DISABLED, bg=BG2, fg=FG_DIM, highlightbackground="#333333")
+        self._cancel_btn.pack(fill=tk.X, padx=14, pady=(4, 0), before=self._vid_render_btn)
         threading.Thread(target=self._process_video_thread, args=(out_path,),
                           daemon=True).start()
 
@@ -951,6 +942,7 @@ class PyFryApp:
             jpeg_quality = int(self._sl_jpeg.get()),
         )
         try:
+            import cv2
             cap   = cv2.VideoCapture(self._source_path)
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
             fps   = cap.get(cv2.CAP_PROP_FPS) or 30
@@ -1002,6 +994,12 @@ class PyFryApp:
             if HAS_MOVIEPY and not self._cancel_flag.is_set():
                 self.root.after(0, self._prog_lbl.config, {"text": "Merging audio…"})
                 try:
+                    try:
+                        from moviepy import VideoFileClip
+                        from moviepy.audio.AudioClip import AudioArrayClip
+                    except ImportError:
+                        from moviepy.editor import VideoFileClip
+                        AudioArrayClip = None
                     orig_clip = VideoFileClip(self._source_path)
                     new_clip  = VideoFileClip(tmp_path)
                     audio = orig_clip.audio
@@ -1055,9 +1053,9 @@ class PyFryApp:
     def _video_done(self, path: str):
         self._prog_var.set(100)
         self._last_video_output = path
-        self._vid_render_btn.config(state=tk.NORMAL)
-        self._vid_copy_btn.config(state=tk.NORMAL, bg="#494d64", fg=FG)
-        self._vid_save_btn.config(state=tk.NORMAL, bg="#494d64", fg=FG)
+        self._vid_render_btn.config(state=tk.NORMAL, text="RENDER")
+        self._vid_copy_btn.config(state=tk.NORMAL, bg="#111111", fg=FG, highlightbackground=BORDER)
+        self._vid_save_btn.config(state=tk.NORMAL, bg="#111111", fg=FG, highlightbackground=BORDER)
         self._hide_cancel_btn()
         self._processing = False
         self._prog_lbl.config(text="Done!")
