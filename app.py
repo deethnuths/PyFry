@@ -194,10 +194,10 @@ class PyFryApp:
         self._progbar = ttk.Progressbar(
             ctrl, variable=self._prog_var, maximum=100, mode="determinate",
         )
-        self._progbar.pack(fill=tk.X, padx=14, pady=(0, 4))
+        # not packed yet — appears only while/after rendering
 
         self._prog_lbl = tk.Label(ctrl, text="", fg=FG_DIM, bg=BG2, font=F_SMALL)
-        self._prog_lbl.pack()
+        # not packed yet — appears only while/after rendering
 
         self._cancel_btn = RoundedButton(
             ctrl, text="CANCEL", command=self._cancel_video,
@@ -927,6 +927,8 @@ class PyFryApp:
         self._vid_render_btn.config(state=tk.DISABLED, text="Rendering…")
         self._vid_copy_btn.config(state=tk.DISABLED, bg=BG2, fg=FG_DIM, highlightbackground="#333333")
         self._vid_save_btn.config(state=tk.DISABLED, bg=BG2, fg=FG_DIM, highlightbackground="#333333")
+        self._progbar.pack(fill=tk.X, padx=14, pady=(0, 4), before=self._vid_render_btn)
+        self._prog_lbl.pack(before=self._vid_render_btn)
         self._cancel_btn.pack(fill=tk.X, padx=14, pady=(4, 0), before=self._vid_render_btn)
         threading.Thread(target=self._process_video_thread, args=(out_path,),
                           daemon=True).start()
