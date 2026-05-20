@@ -55,6 +55,11 @@ class PyFryApp:
         self._copy_tmp: str | None = None
         self._last_video_output: str | None = None
         self._tk_img = None
+        self._full_img: Image.Image | None = None
+        self._zoom: float = 1.0
+        self._pan_x: int = 0
+        self._pan_y: int = 0
+        self._drag_start: tuple | None = None
         self._preview_job = None
         self._processing = False
         self._video_copy_mode = False
@@ -284,6 +289,20 @@ class PyFryApp:
         self.root.bind("<Control-v>", self._paste)
         self.root.bind("<Control-V>", self._paste)
         self._canvas.bind("<Configure>", self._on_canvas_resize)
+        self._canvas.bind("<ButtonPress-1>",   self._on_drag_start)
+        self._canvas.bind("<B1-Motion>",        self._on_drag)
+        self._canvas.bind("<ButtonRelease-1>",  self._on_drag_end)
+        self._canvas.bind("<MouseWheel>",        self._on_zoom)   # Windows
+        self._canvas.bind("<Button-4>",          self._on_zoom)   # Linux scroll up
+        self._canvas.bind("<Button-5>",          self._on_zoom)   # Linux scroll down
+        self._canvas.bind("<ButtonPress-3>",     self._reset_view) # right-click resets
+
+        # Reset-view overlay button tag bindings (items created in _update_reset_btn)
+        self._canvas.tag_bind("reset_btn", "<ButtonPress-1>", self._reset_view)
+        self._canvas.tag_bind("reset_btn", "<Enter>",
+            lambda _: self._canvas.itemconfig("reset_btn_bg", fill="#363a4f"))
+        self._canvas.tag_bind("reset_btn", "<Leave>",
+            lambda _: self._canvas.itemconfig("reset_btn_bg", fill="#2a2d3e"))
 
         if HAS_DND:
             self._canvas.drop_target_register(DND_FILES)
@@ -296,8 +315,87 @@ class PyFryApp:
     def _on_canvas_resize(self, _event):
         if self._source is None:
             self._draw_hint()
+        elif self._full_img is not None:
+            self._render_view()
         else:
             self._update_preview()
+
+    # ── Pan / zoom ─────────────────────────────────────────────────────────────
+    def _on_drag_start(self, event):
+        if self._full_img is None:
+            return
+        # Don't start a drag when clicking the reset-view overlay button
+        hit = self._canvas.find_overlapping(event.x - 1, event.y - 1, event.x + 1, event.y + 1)
+        if any("reset_btn" in self._canvas.gettags(i) for i in hit):
+            return
+        self._drag_start = (event.x, event.y)
+        self._canvas.config(cursor="fleur")
+
+    def _on_drag(self, event):
+        if self._drag_start is None:
+            return
+        self._pan_x += event.x - self._drag_start[0]
+        self._pan_y += event.y - self._drag_start[1]
+        self._drag_start = (event.x, event.y)
+        self._render_view()
+
+    def _on_drag_end(self, _event):
+        self._drag_start = None
+        if self._full_img is not None:
+            self._canvas.config(cursor="hand2")
+
+    def _on_zoom(self, event):
+        if self._full_img is None:
+            return
+        factor = 1.15 if (getattr(event, "delta", 0) > 0 or event.num == 4) else 1 / 1.15
+        new_zoom = max(0.1, min(20.0, self._zoom * factor))
+        if new_zoom == self._zoom:
+            return
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
+        ratio = new_zoom / self._zoom
+        qx = event.x - cw // 2
+        qy = event.y - ch // 2
+        self._pan_x = int((self._pan_x - qx) * ratio + qx)
+        self._pan_y = int((self._pan_y - qy) * ratio + qy)
+        self._zoom = new_zoom
+        self._render_view()
+
+    def _reset_view(self, _event=None):
+        self._zoom = 1.0
+        self._pan_x = 0
+        self._pan_y = 0
+        self._render_view()
+
+    def _update_reset_btn(self):
+        self._canvas.delete("reset_btn")
+        if self._zoom == 1.0 and self._pan_x == 0 and self._pan_y == 0:
+            return
+
+        cw  = self._canvas.winfo_width()
+        pad = 8
+        sz  = 24
+        x1, y1 = cw - pad - sz, pad
+        x2, y2 = cw - pad,      pad + sz
+
+        # Background pill (stipple gives dithered transparency)
+        self._canvas.create_rectangle(
+            x1, y1, x2, y2,
+            fill="#2a2d3e", outline="#6e738d", width=1,
+            stipple="gray75",
+            tags=("reset_btn", "reset_btn_bg"),
+        )
+
+        # Four-corner "fit" icon drawn with L-shaped lines
+        m = 5   # margin from button edge to icon area
+        a = 5   # arm length of each corner bracket
+        ix1, iy1 = x1 + m, y1 + m
+        ix2, iy2 = x2 - m, y2 - m
+        kw = dict(fill="#cad3f5", width=1.5, tags=("reset_btn",))
+        self._canvas.create_line(ix1, iy1 + a, ix1, iy1, ix1 + a, iy1, **kw)  # top-left
+        self._canvas.create_line(ix2 - a, iy1, ix2, iy1, ix2, iy1 + a, **kw)  # top-right
+        self._canvas.create_line(ix1, iy2 - a, ix1, iy2, ix1 + a, iy2, **kw)  # bottom-left
+        self._canvas.create_line(ix2 - a, iy2, ix2, iy2, ix2, iy2 - a, **kw)  # bottom-right
 
     # ── File loading ───────────────────────────────────────────────────────────
     def _on_drop(self, event):
@@ -330,6 +428,10 @@ class PyFryApp:
         self._gif_processed = []
         self._last_video_output = None
         self._tk_img = None
+        self._full_img = None
+        self._zoom = 1.0
+        self._pan_x = 0
+        self._pan_y = 0
         self._status_var.set("Drop an image or video here  •  Ctrl+V to paste  •  double-click to open")
         self._canvas.delete("all")
         self._draw_hint()
@@ -346,6 +448,7 @@ class PyFryApp:
                 self._source = cb.convert("RGB")
                 self._source_path = None
                 self._is_video = False
+                self._zoom = 1.0; self._pan_x = 0; self._pan_y = 0
                 size = self._source.size
                 self._status_var.set(f"Pasted from clipboard — {size[0]}×{size[1]}")
                 self._update_preview()
@@ -388,6 +491,7 @@ class PyFryApp:
                     self._source_path   = path
                     self._is_video      = False
                     self._is_gif        = True
+                    self._zoom = 1.0; self._pan_x = 0; self._pan_y = 0
                     w, h = self._source.size
                     self._status_var.set(
                         f"GIF: {os.path.basename(path)}  —  {w}×{h}  "
@@ -401,6 +505,7 @@ class PyFryApp:
                     self._source = img.convert("RGB")
                     self._source_path = path
                     self._is_video = False
+                    self._zoom = 1.0; self._pan_x = 0; self._pan_y = 0
                     w, h = self._source.size
                     self._status_var.set(f"{os.path.basename(path)}  —  {w}×{h}")
                     self._update_preview()
@@ -425,6 +530,7 @@ class PyFryApp:
                 self._source = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 self._source_path = path
                 self._is_video = True
+                self._zoom = 1.0; self._pan_x = 0; self._pan_y = 0
                 self._status_var.set(
                     f"Video: {os.path.basename(path)}  (preview = first frame)")
                 self._update_preview()
@@ -453,14 +559,52 @@ class PyFryApp:
             self._show_frame(self._effects(self._source))
 
     def _show_frame(self, img: Image.Image):
+        self._full_img = img
+        self._render_view()
+
+    def _render_view(self):
+        img = self._full_img
+        if img is None:
+            return
         cw = max(self._canvas.winfo_width(), 80)
         ch = max(self._canvas.winfo_height(), 80)
-        thumb = img.copy()
-        thumb.thumbnail((cw, ch), Image.LANCZOS)
-        self._tk_img = ImageTk.PhotoImage(thumb)
+        iw, ih = img.size
+
+        fit_scale  = min(cw / iw, ch / ih)
+        disp_scale = fit_scale * self._zoom
+        disp_w = max(1, int(iw * disp_scale))
+        disp_h = max(1, int(ih * disp_scale))
+
+        # image center on canvas (offset by pan)
+        cx = cw // 2 + self._pan_x
+        cy = ch // 2 + self._pan_y
+        img_l_canvas = cx - disp_w // 2
+        img_t_canvas = cy - disp_h // 2
+
+        # clip to canvas bounds
+        vis_l = max(0, img_l_canvas)
+        vis_t = max(0, img_t_canvas)
+        vis_r = min(cw, img_l_canvas + disp_w)
+        vis_b = min(ch, img_t_canvas + disp_h)
+
+        if vis_r <= vis_l or vis_b <= vis_t:
+            self._canvas.delete("all")
+            self._update_reset_btn()
+            return
+
+        # map visible canvas region back to original image pixels
+        img_crop_l = max(0, int((vis_l - img_l_canvas) / disp_scale))
+        img_crop_t = max(0, int((vis_t - img_t_canvas) / disp_scale))
+        img_crop_r = min(iw, int((vis_r - img_l_canvas) / disp_scale) + 1)
+        img_crop_b = min(ih, int((vis_b - img_t_canvas) / disp_scale) + 1)
+
+        tile = img.crop((img_crop_l, img_crop_t, img_crop_r, img_crop_b))
+        tile = tile.resize((vis_r - vis_l, vis_b - vis_t), Image.LANCZOS)
+
+        self._tk_img = ImageTk.PhotoImage(tile)
         self._canvas.delete("all")
-        self._canvas.create_image(cw // 2, ch // 2, anchor=tk.CENTER,
-                                   image=self._tk_img)
+        self._canvas.create_image(vis_l, vis_t, anchor=tk.NW, image=self._tk_img)
+        self._update_reset_btn()
 
     # ── GIF animation ──────────────────────────────────────────────────────────
     def _tick_animation(self):
