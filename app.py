@@ -231,6 +231,14 @@ class PyFryApp:
         )
         self._copy_btn.pack(fill=tk.X, padx=16, pady=(12, 0), side=tk.BOTTOM)
 
+        self._fry_again_btn = tk.Button(
+            ctrl, text="FRY AGAIN", bg="#363a4f", fg=ORANGE,
+            font=("Segoe UI", 9, "bold"), relief=tk.FLAT, pady=8,
+            cursor="hand2", activebackground="#494d64", activeforeground=ORANGE,
+            command=self._fry_again,
+        )
+        self._fry_again_btn.pack(fill=tk.X, padx=16, pady=(4, 0), side=tk.BOTTOM)
+
         self._vid_render_btn = tk.Button(
             ctrl, text="RENDER", bg=ACCENT, fg="white",
             font=("Segoe UI", 12, "bold"), relief=tk.FLAT, pady=12,
@@ -261,6 +269,7 @@ class PyFryApp:
             self._last_video_output = None
             self._save_btn.pack_forget()
             self._copy_btn.pack_forget()
+            self._fry_again_btn.pack_forget()
             self._vid_render_btn.pack(fill=tk.X, padx=16, pady=(4, 6), side=tk.BOTTOM)
             self._vid_action_row.pack(fill=tk.X, padx=16, pady=(8, 0), side=tk.BOTTOM)
             self._vid_copy_btn.config(state=tk.DISABLED, bg="#1e2030", fg="#6e738d")
@@ -270,6 +279,7 @@ class PyFryApp:
             self._vid_action_row.pack_forget()
             self._save_btn.pack(fill=tk.X, padx=16, pady=(4, 6), side=tk.BOTTOM)
             self._copy_btn.pack(fill=tk.X, padx=16, pady=(12, 0), side=tk.BOTTOM)
+            self._fry_again_btn.pack(fill=tk.X, padx=16, pady=(4, 0), side=tk.BOTTOM)
 
     # ── Hint overlay ──────────────────────────────────────────────────────────
     def _draw_hint(self):
@@ -692,6 +702,22 @@ class PyFryApp:
         self._sl_noise.set(0.13)
         self._sl_jpeg.set(28)
         self._sl_audio.set(0.15)
+        self._update_preview()
+
+    def _fry_again(self):
+        if self._source is None:
+            return
+        if self._is_gif and self._gif_frames:
+            frames = self._gif_processed if self._gif_processed else [self._effects(f) for f in self._gif_frames]
+            self._gif_frames = [f.copy() for f in frames]
+            self._gif_processed = []
+            self._source = self._gif_frames[0]
+        else:
+            self._source = self._effects(self._source)
+        self._zoom = 1.0
+        self._pan_x = 0
+        self._pan_y = 0
+        self._status_var.set("Fried again — effects baked into source")
         self._update_preview()
 
     def _randomize(self):
