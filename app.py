@@ -148,7 +148,7 @@ class PyFryApp:
         self._sl_noise.pack(fill=tk.X, padx=4, pady=2)
 
         self._sl_jpeg = SliderRow(
-            ctrl, "JPEG Crush", 1, 95, 85,
+            ctrl, "JPEG Crush", 95, 1, 85,
             fmt="{:.0f}", on_change=upd,
         )
         self._sl_jpeg.pack(fill=tk.X, padx=4, pady=2)

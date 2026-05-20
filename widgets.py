@@ -299,7 +299,8 @@ class SliderRow(tk.Frame):
         except ValueError:
             self._revert()
             return
-        v = max(self._from, min(self._to, v))
+        lo, hi = min(self._from, self._to), max(self._from, self._to)
+        v = max(lo, min(hi, v))
         self._updating = True
         self._var.set(v)
         self._entry_var.set(self._fmt.format(v))
