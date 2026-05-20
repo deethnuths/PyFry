@@ -1,5 +1,6 @@
 import io
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
@@ -66,6 +67,12 @@ class PyFryApp:
         self._preview_job = None
         self._processing = False
         self._cancel_flag = threading.Event()
+        self._playback_cap = None
+        self._playback_job = None
+        self._playback_delay = 33
+        self._playback_paused = True
+        self._frame_queue: queue.Queue | None = None
+        self._playback_reader_stop: threading.Event | None = None
 
         self._build_ui()
         self._bind_events()
@@ -304,6 +311,12 @@ class PyFryApp:
         self._canvas.tag_bind("clear_btn", "<Leave>",
             lambda _: self._canvas.itemconfig("clear_btn_bg", fill="#111111"))
 
+        self._canvas.tag_bind("playpause_btn", "<ButtonPress-1>", lambda _: self._toggle_playback())
+        self._canvas.tag_bind("playpause_btn", "<Enter>",
+            lambda _: self._canvas.itemconfig("playpause_btn_bg", fill="#222222"))
+        self._canvas.tag_bind("playpause_btn", "<Leave>",
+            lambda _: self._canvas.itemconfig("playpause_btn_bg", fill="#111111"))
+
         if HAS_DND:
             self._canvas.drop_target_register(DND_FILES)
             self._canvas.dnd_bind("<<Drop>>",      self._on_drop)
@@ -326,7 +339,7 @@ class PyFryApp:
             return
         # Don't start a drag when clicking the reset-view overlay button
         hit = self._canvas.find_overlapping(event.x - 1, event.y - 1, event.x + 1, event.y + 1)
-        if any(t in self._canvas.gettags(i) for i in hit for t in ("reset_btn", "clear_btn")):
+        if any(t in self._canvas.gettags(i) for i in hit for t in ("reset_btn", "clear_btn", "playpause_btn")):
             return
         self._drag_start = (event.x, event.y)
         self._canvas.config(cursor="fleur")
@@ -370,6 +383,7 @@ class PyFryApp:
     def _update_overlay_btns(self):
         self._canvas.delete("reset_btn")
         self._canvas.delete("clear_btn")
+        self._canvas.delete("playpause_btn")
 
         cw  = self._canvas.winfo_width()
         pad = 8
@@ -417,6 +431,27 @@ class PyFryApp:
             self._canvas.create_line(ix1, iy2 - a, ix1, iy2, ix1 + a, iy2, **kw)
             self._canvas.create_line(ix2 - a, iy2, ix2, iy2, ix2, iy2 - a, **kw)
 
+        # Play/pause button — visible when a rendered video is loaded
+        if self._playback_cap is not None:
+            bw, bh = 48, 28
+            ch = self._canvas.winfo_height()
+            bx1 = self._canvas.winfo_width() // 2 - bw // 2
+            by1 = ch - pad - bh
+            bx2 = bx1 + bw
+            by2 = by1 + bh
+            self._canvas.create_rectangle(
+                bx1, by1, bx2, by2,
+                fill="#111111", outline="#333333", width=1,
+                stipple="gray75",
+                tags=("playpause_btn", "playpause_btn_bg"),
+            )
+            symbol = "▶" if self._playback_paused else "⏸"
+            self._canvas.create_text(
+                (bx1 + bx2) // 2, (by1 + by2) // 2,
+                text=symbol, fill=FG_DIM, font=("Cascadia Code", 11),
+                tags=("playpause_btn",),
+            )
+
     # ── File loading ───────────────────────────────────────────────────────────
     def _on_drop(self, event):
         self._canvas.config(bg=BG)
@@ -438,6 +473,7 @@ class PyFryApp:
             self._load_path(path)
 
     def _clear(self):
+        self._stop_playback()
         self._stop_animation()
         self._source = None
         self._source_path = None
@@ -571,6 +607,7 @@ class PyFryApp:
     def _update_preview(self):
         if self._source is None:
             return
+        self._stop_playback()
         if self._is_gif and self._gif_frames:
             self._stop_animation()
             self._gif_processed = [self._effects(f) for f in self._gif_frames]
@@ -620,7 +657,8 @@ class PyFryApp:
         img_crop_b = min(ih, int((vis_b - img_t_canvas) / disp_scale) + 1)
 
         tile = img.crop((img_crop_l, img_crop_t, img_crop_r, img_crop_b))
-        tile = tile.resize((vis_r - vis_l, vis_b - vis_t), Image.LANCZOS)
+        resample = Image.BILINEAR if (self._playback_cap is not None and not self._playback_paused) else Image.LANCZOS
+        tile = tile.resize((vis_r - vis_l, vis_b - vis_t), resample)
 
         self._tk_img = ImageTk.PhotoImage(tile)
         self._canvas.delete("all")
@@ -641,6 +679,84 @@ class PyFryApp:
         if self._anim_job:
             self.root.after_cancel(self._anim_job)
             self._anim_job = None
+
+    # ── Rendered video playback ────────────────────────────────────────────────
+    def _start_video_playback(self, path: str):
+        self._stop_playback()
+        import cv2
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            return
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self._playback_cap = cap
+        self._playback_delay = max(16, int(1000 / fps))
+        self._playback_paused = True
+        ret, frame = cap.read()
+        if ret:
+            img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            self._show_frame(img)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self._frame_queue = queue.Queue(maxsize=8)
+        self._playback_reader_stop = threading.Event()
+        threading.Thread(target=self._frame_reader_thread, daemon=True).start()
+
+    def _frame_reader_thread(self):
+        import cv2
+        cap = self._playback_cap
+        stop = self._playback_reader_stop
+        q = self._frame_queue
+        while not stop.is_set():
+            if self._playback_paused:
+                stop.wait(0.01)
+                continue
+            ret, frame = cap.read()
+            if not ret:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+            try:
+                img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                q.put(img, timeout=0.05)
+            except Exception:
+                pass
+
+    def _tick_playback(self):
+        if self._playback_paused or self._playback_cap is None:
+            return
+        if self._frame_queue is not None:
+            try:
+                img = self._frame_queue.get_nowait()
+                self._show_frame(img)
+            except queue.Empty:
+                pass
+        self._playback_job = self.root.after(self._playback_delay, self._tick_playback)
+
+    def _toggle_playback(self):
+        if self._playback_cap is None:
+            return
+        self._playback_paused = not self._playback_paused
+        if not self._playback_paused:
+            self._tick_playback()
+        else:
+            self._render_view()
+
+    def _stop_playback(self):
+        if self._playback_reader_stop is not None:
+            self._playback_reader_stop.set()
+            self._playback_reader_stop = None
+        if self._frame_queue is not None:
+            try:
+                while True:
+                    self._frame_queue.get_nowait()
+            except queue.Empty:
+                pass
+            self._frame_queue = None
+        if self._playback_job:
+            self.root.after_cancel(self._playback_job)
+            self._playback_job = None
+        if self._playback_cap is not None:
+            self._playback_cap.release()
+            self._playback_cap = None
+        self._playback_paused = True
 
     # ── Effects helper ─────────────────────────────────────────────────────────
     def _effects(self, img: Image.Image) -> Image.Image:
@@ -1062,6 +1178,7 @@ class PyFryApp:
         self._processing = False
         self._prog_lbl.config(text="Done!")
         self._status_var.set("Rendered — use COPY or SAVE below")
+        self._start_video_playback(path)
 
     def _put_file_on_clipboard(self, path: str):
         try:
