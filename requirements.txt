@@ -1,0 +1,15 @@
+# Required
+pillow
+numpy
+
+# Optional — drag-and-drop file support
+tkinterdnd2
+
+# Optional — video support and faster frame processing
+opencv-python
+
+# Optional — audio preservation during video export
+moviepy
+
+# Optional — native Windows clipboard copy (falls back to PowerShell if absent)
+pywin32
